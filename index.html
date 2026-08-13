@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bradbridge Card Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a472a;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+        canvas {
+            background-color: #2e7d32;
+            box-shadow: 0px 0px 20px rgba(0,0,0,0.5);
+            border-radius: 10px;
+        }
+        #ui-overlay {
+            margin-bottom: 15px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 1px 1px 3px black;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        #restart-btn {
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            background-color: #ff9800;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.3);
+            display: none;
+            transition: background-color 0.2s;
+        }
+        #restart-btn:hover {
+            background-color: #e65100;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-overlay">
+    <div id="status-msg">Initializing Bradbridge...</div>
+    <button id="restart-btn" onclick="handleRestartClick()">Start New Game</button>
+</div>
+<canvas id="gameCanvas" width="900" height="700"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const statusMsg = document.getElementById('status-msg');
+const restartBtn = document.getElementById('restart-btn');
+
+// --- Game Configurations ---
+const CARD_WIDTH = 70;
+const CARD_HEIGHT = 100;
+const RADIUS = 5;
+
+const PLAYER_NAMES = ["You (Team A)", "AI West (Team B)", "AI Partner (Team A)", "AI East (Team B)"];
+let players = [[], [], [], []]; 
+let centerCards = []; 
+let deck = [];
+let turn = 0; 
+let dealer = 0;
+let gameOver = false;
+let gameStatusText = "";
+
+// Selection state for manual wild card matching
+let isSelectingMatch = false;
+let selectedHandCardIdx = -1;
+
+function createDeck() {
+    const newDeck = [];
+    // Included 'J' as a normal card; full 52-card deck
+    const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    for (let i = 0; i < 4; i++) {
+        for (let val of values) {
+            newDeck.push({
+                value: val,
+                isWild: ['Q', 'K'].includes(val), // Only Queen & King remain Wilds
+                id: Math.random()
+            });
+        }
+    }
+    return newDeck;
+}
+
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+function initGame() {
+    deck = createDeck();
+    shuffle(deck);
+    
+    players = [[], [], [], []];
+    centerCards = [];
+    gameOver = false;
+    isSelectingMatch = false;
+    selectedHandCardIdx = -1;
+    restartBtn.style.display = 'none';
+    
+    for (let i = 0; i < 5; i++) {
+        for (let p = 0; p < 4; p++) {
+            players[p].push(deck.pop());
+        }
+    }
+    
+    for (let i = 0; i < 4; i++) {
+        let card = deck.pop();
+        centerCards.push({
+            value: card.value,
+            isWild: card.isWild,
+            isFaceDown: false
+        });
+    }
+    
+    turn = (dealer + 1) % 4;
+    updateStatus();
+    render();
+    
+    if (turn !== 0) {
+        setTimeout(aiTurn, 1200);
+    }
+}
+
+function isMatch(cardA, cardB) {
+    if (cardA.isWild || cardB.isWild) return true;
+    return cardA.value === cardB.value;
+}
+
+function hasOpenPile() {
+    return centerCards.some(c => c.isFaceDown);
+}
+
+function getOpenPileIndex() {
+    return centerCards.findIndex(c => c.isFaceDown);
+}
+
+function checkWinCondition(playerIndex) {
+    if (players[playerIndex].length === 0) {
+        gameOver = true;
+        const team = (playerIndex % 2 === 0) ? "Team A (You & Partner)" : "Team B (E & W AIs)";
+        gameStatusText = `🎉 ${PLAYER_NAMES[playerIndex]} has no more cards! ${team} Wins the Game!`;
+        restartBtn.style.display = 'block';
+        return true;
+    }
+    if (deck.length === 0) {
+        gameOver = true;
+        gameStatusText = "👔 Out of cards! The game ends in a Draw.";
+        restartBtn.style.display = 'block';
+        return true;
+    }
+    return false;
+}
+
+function nextTurn() {
+    isSelectingMatch = false;
+    selectedHandCardIdx = -1;
+    turn = (turn + 1) % 4;
+    updateStatus();
+    render();
+    
+    if (!gameOver && turn !== 0) {
+        setTimeout(aiTurn, 1400);
+    }
+}
+
+function updateStatus() {
+    if (gameOver) {
+        statusMsg.innerHTML = gameStatusText;
+    } else if (isSelectingMatch) {
+        statusMsg.innerHTML = "<b>Wild Card Active:</b> Click one of the highlighted face-up center cards to match it.";
+    } else {
+        statusMsg.innerHTML = turn === 0 ? "<b>Your Turn:</b> Click a card to match/cover open pile, or click the Deck to draw." : `<b>${PLAYER_NAMES[turn]}'s Turn...</b> Thinking.`;
+    }
+}
+
+function handleRestartClick() {
+    dealer = (dealer + 1) % 4;
+    initGame();
+}
+
+function executeMove(playerIdx, playerCardIdx, centerIdx, moveType) {
+    const hand = players[playerIdx];
+
+    if (moveType === 'MATCH') {
+        const pCard = hand[playerCardIdx];
+        const wasLastCardWild = (hand.length === 1 && pCard.isWild);
+
+        // Standard Match Play
+        centerCards[centerIdx] = { value: pCard.value, isWild: pCard.isWild, isFaceDown: true };
+        hand.splice(playerCardIdx, 1);
+
+        // If played as a final Wild Card, automatically draw a replacement card
+        if (wasLastCardWild) {
+            if (deck.length > 0) {
+                hand.push(deck.pop());
+            }
+        }
+    } 
+    else if (moveType === 'NO_MATCH') {
+        if (deck.length > 0) {
+            hand.push(deck.pop());
+        }
+    } 
+    else if (moveType === 'OPEN_PILE') {
+        const pCard = hand[playerCardIdx];
+        centerCards[centerIdx] = { value: pCard.value, isWild: pCard.isWild, isFaceDown: false };
+        hand.splice(playerCardIdx, 1);
+        if (deck.length > 0) {
+            hand.push(deck.pop());
+        }
+    }
+    
+    if (checkWinCondition(playerIdx)) {
+        updateStatus();
+        render();
+        return;
+    }
+    
+    nextTurn();
+}
+
+function aiTurn() {
+    if (gameOver) return;
+
+    const hand = players[turn];
+    const partnerIdx = (turn + 2) % 4;
+    const nextOpponentIdx = (turn + 1) % 4; // Left opponent
+    const prevOpponentIdx = (turn + 3) % 4; // Right opponent
+
+    const partnerHand = players[partnerIdx];
+    const nextOppHand = players[nextOpponentIdx];
+    const prevOppHand = players[prevOpponentIdx];
+
+    const partnerNeedsWin = partnerHand.length <= 2;
+    const opponentThreat = nextOppHand.length <= 2 || prevOppHand.length <= 2;
+
+    // --- Step 1: Collect and Score All Valid Match Moves ---
+    let possibleMatches = [];
+
+    for (let i = 0; i < hand.length; i++) {
+        const handCard = hand[i];
+
+        for (let j = 0; j < centerCards.length; j++) {
+            const centerCard = centerCards[j];
+            if (centerCard.isFaceDown || !isMatch(handCard, centerCard)) continue;
+
+            let score = 100;
+
+            if (handCard.isWild) {
+                score -= 40; 
+                if (hand.length <= 2 || partnerNeedsWin) {
+                    score += 50;
+                }
+            }
+
+            const partnerHasMatch = partnerHand.some(c => isMatch(c, centerCard));
+            if (partnerHasMatch) {
+                if (partnerNeedsWin) {
+                    if (hand.length > partnerHand.length) {
+                        score -= 25; 
+                    }
+                } else {
+                    score += 15;
+                }
+            }
+
+            // --- RULE 2: Avoid playing a card if an opponent (Left or Right) shares the same card ---
+            const leftOpponentHasCard = nextOppHand.some(c => !c.isWild && c.value === handCard.value);
+            const rightOpponentHasCard = prevOppHand.some(c => !c.isWild && c.value === handCard.value);
+
+            if (leftOpponentHasCard) {
+                score -= 45; // Strongly avoid playing if left opponent has it
+            } else if (rightOpponentHasCard) {
+                score -= 30; // Avoid playing if right opponent has it
+            }
+
+            if (opponentThreat && (leftOpponentHasCard || rightOpponentHasCard)) {
+                score -= 30; // Additional penalty if opponents are close to winning
+            }
+
+            possibleMatches.push({
+                handIdx: i,
+                centerIdx: j,
+                score: score
+            });
+        }
+    }
+
+    // --- Step 2: Execute Best Option If Favorable ---
+    if (possibleMatches.length > 0) {
+        possibleMatches.sort((a, b) => b.score - a.score);
+        const bestMove = possibleMatches[0];
+        
+        // AI will match if non-wild or score is good enough
+        if (!hand[bestMove.handIdx].isWild || bestMove.score > 60 || hand.length === 1) {
+            executeMove(turn, bestMove.handIdx, bestMove.centerIdx, 'MATCH');
+            return;
+        }
+    }
+
+    // --- Step 3: Open Pile Strategy ---
+    if (hasOpenPile()) {
+        const pileIdx = getOpenPileIndex();
+        
+        let chosenCardIdx = -1;
+
+        // --- RULE 1: If you share a non-wild card with partner, play it to open pile ---
+        for (let i = 0; i < hand.length; i++) {
+            const hCard = hand[i];
+            if (!hCard.isWild) {
+                const partnerHasSameCard = partnerHand.some(pCard => !pCard.isWild && pCard.value === hCard.value);
+                if (partnerHasSameCard) {
+                    chosenCardIdx = i;
+                    break;
+                }
+            }
+        }
+
+        // Fallback: Pick first non-wild card if no shared partner card was found
+        if (chosenCardIdx === -1) {
+            for (let i = 0; i < hand.length; i++) {
+                if (!hand[i].isWild) {
+                    chosenCardIdx = i;
+                    break;
+                }
+            }
+        }
+
+        // Final fallback: Use index 0
+        if (chosenCardIdx === -1) chosenCardIdx = 0;
+
+        executeMove(turn, chosenCardIdx, pileIdx, 'OPEN_PILE');
+        return;
+    }
+
+    // --- Step 4: Draw a Card ---
+    executeMove(turn, -1, -1, 'NO_MATCH');
+}
+
+//function aiTurn() {
+//    if (gameOver) return;
+//
+//    const hand = players[turn];
+//    const partnerIdx = (turn + 2) % 4;
+//    const nextOpponentIdx = (turn + 1) % 4;
+//    const otherOpponentIdx = (turn + 3) % 4;
+//
+//    const partnerHand = players[partnerIdx];
+//    const nextOppHand = players[nextOpponentIdx];
+//    const otherOppHand = players[otherOpponentIdx];
+//
+//    const partnerNeedsWin = partnerHand.length <= 2;
+//    const opponentThreat = nextOppHand.length <= 2 || otherOppHand.length <= 2;
+//
+//    // --- Step 1: Collect and Score All Valid Match Moves ---
+//    let possibleMatches = [];
+//
+//    for (let i = 0; i < hand.length; i++) {
+//        const handCard = hand[i];
+//
+//        for (let j = 0; j < centerCards.length; j++) {
+//            const centerCard = centerCards[j];
+//            if (centerCard.isFaceDown || !isMatch(handCard, centerCard)) continue;
+//
+//            let score = 100;
+//
+//            if (handCard.isWild) {
+//                score -= 40; 
+//                if (hand.length <= 2 || partnerNeedsWin) {
+//                    score += 50;
+//                }
+//            }
+//
+//            const partnerHasMatch = partnerHand.some(c => isMatch(c, centerCard));
+//            if (partnerHasMatch) {
+//                if (partnerNeedsWin) {
+//                    if (hand.length > partnerHand.length) {
+//                        score -= 25; 
+//                    }
+//                } else {
+//                    score += 15;
+//                }
+//            }
+//
+//            const nextOpponentCanMatch = nextOppHand.some(c => isMatch(c, handCard));
+//            if (nextOpponentCanMatch && opponentThreat) {
+//                score -= 30;
+//            }
+//
+//            possibleMatches.push({
+//                handIdx: i,
+//                centerIdx: j,
+//                score: score
+//            });
+//        }
+//    }
+//
+//    // --- Step 2: Execute Best Option If Favorable ---
+//    if (possibleMatches.length > 0) {
+//        possibleMatches.sort((a, b) => b.score - a.score);
+//        const bestMove = possibleMatches[0];
+//        
+//        // AI will match if non-wild or score is good enough
+//        if (!hand[bestMove.handIdx].isWild || bestMove.score > 60 || hand.length === 1) {
+//            executeMove(turn, bestMove.handIdx, bestMove.centerIdx, 'MATCH');
+//            return;
+//        }
+//    }
+//
+//    // --- Step 3: Fallback Options (Open Pile or Draw) ---
+//    if (hasOpenPile()) {
+//        const pileIdx = getOpenPileIndex();
+//        
+//        let chosenCardIdx = 0;
+//        for (let i = 0; i < hand.length; i++) {
+//            if (!hand[i].isWild) {
+//                chosenCardIdx = i;
+//                break;
+//            }
+//        }
+//        executeMove(turn, chosenCardIdx, pileIdx, 'OPEN_PILE');
+//        return;
+//    }
+//
+//    // Step 4: Choose to Draw a card instead of making an unfavorable match
+//    executeMove(turn, -1, -1, 'NO_MATCH');
+//}
+
+canvas.addEventListener('click', function(e) {
+    if (gameOver || turn !== 0) return; 
+    
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    
+    const centerStartX = canvas.width / 2 + 10;
+    const centerStartY = canvas.height / 2 - CARD_HEIGHT / 2;
+
+    // --- Scenario A: Selecting center card to match via Wild Card ---
+    if (isSelectingMatch) {
+        let clickedCenterIdx = -1;
+        
+        centerCards.forEach((cCard, idx) => {
+            let offsetX = (idx % 2) * (CARD_WIDTH + 15);
+            let offsetY = Math.floor(idx / 2) * (CARD_HEIGHT / 2 + 15) - 30; 
+            let cx = centerStartX + offsetX;
+            let cy = centerStartY + offsetY;
+            
+            if (mx >= cx && mx <= cx + CARD_WIDTH && my >= cy && my <= cy + CARD_HEIGHT) {
+                if (!cCard.isFaceDown) {
+                    clickedCenterIdx = idx;
+                }
+            }
+        });
+        
+        if (clickedCenterIdx !== -1) {
+            executeMove(0, selectedHandCardIdx, clickedCenterIdx, 'MATCH');
+        } else {
+            isSelectingMatch = false;
+            selectedHandCardIdx = -1;
+            updateStatus();
+            render();
+        }
+        return;
+    }
+
+    // --- Scenario B: Standard Hand Card Selection Turn ---
+    const p0Cards = players[0];
+    const startX = canvas.width / 2 - (p0Cards.length * (CARD_WIDTH + 10)) / 2;
+    const yPos = canvas.height - CARD_HEIGHT - 30;
+    
+    let clickedCardIdx = -1;
+    for (let i = 0; i < p0Cards.length; i++) {
+        let x = startX + i * (CARD_WIDTH + 10);
+        if (mx >= x && mx <= x + CARD_WIDTH && my >= yPos && my <= yPos + CARD_HEIGHT) {
+            clickedCardIdx = i;
+            break;
+        }
+    }
+    
+    if (clickedCardIdx !== -1) {
+        const selectedHandCard = p0Cards[clickedCardIdx];
+
+        let matchIndices = [];
+        for (let j = 0; j < centerCards.length; j++) {
+            if (!centerCards[j].isFaceDown && isMatch(selectedHandCard, centerCards[j])) {
+                matchIndices.push(j);
+            }
+        }
+        
+        // If card matches, make the match (or prompt wild choice)
+        if (matchIndices.length > 0) {
+            if (selectedHandCard.isWild && matchIndices.length > 1) {
+                isSelectingMatch = true;
+                selectedHandCardIdx = clickedCardIdx;
+                updateStatus();
+                render();
+            } else {
+                executeMove(0, clickedCardIdx, matchIndices[0], 'MATCH');
+            }
+        } else if (hasOpenPile()) {
+            // Otherwise, cover an open pile if one exists
+            const pileIdx = getOpenPileIndex();
+            executeMove(0, clickedCardIdx, pileIdx, 'OPEN_PILE');
+        } else {
+            // Otherwise, draw a card
+            executeMove(0, -1, -1, 'NO_MATCH');
+        }
+    } else {
+        // Deck Click or background click check - players can freely choose to draw at any time
+        const deckX = canvas.width / 2 - CARD_WIDTH - 20;
+        const deckY = canvas.height / 2 - CARD_HEIGHT / 2;
+        if (mx >= deckX && mx <= deckX + CARD_WIDTH && my >= deckY && my <= deckY + CARD_HEIGHT) {
+            executeMove(0, -1, -1, 'NO_MATCH');
+        }
+    }
+});
+
+function drawCard(x, y, card, faceDown = false, isHighlighted = false) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.fillStyle = faceDown ? '#b71c1c' : '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(x, y, CARD_WIDTH, CARD_HEIGHT, RADIUS);
+    ctx.fill();
+    
+    if (isHighlighted) {
+        ctx.strokeStyle = '#ffeb3b';
+        ctx.lineWidth = 4;
+    } else {
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1.5;
+    }
+    ctx.stroke();
+    ctx.restore();
+    
+    if (faceDown) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 8, y + 8, CARD_WIDTH - 16, CARD_HEIGHT - 16);
+        ctx.fillStyle = '#d32f2f';
+        ctx.fillRect(x + 14, y + 14, CARD_WIDTH - 28, CARD_HEIGHT - 28);
+        return;
+    }
+    
+    ctx.fillStyle = card.isWild ? '#e65100' : '#000000'; 
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(card.value, x + 6, y + 6);
+    
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (card.isWild) {
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#e65100';
+        ctx.fillText("WILD", x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2 - 10);
+        ctx.font = '24px Arial';
+        ctx.fillText(card.value, x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2 + 12);
+    } else {
+        ctx.font = '28px Arial';
+        ctx.fillText(card.value, x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2);
+    }
+}
+
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    if (!gameOver) {
+        if (turn === 0) ctx.fillRect(0, canvas.height - 150, canvas.width, 150);
+        else if (turn === 1) ctx.fillRect(0, 0, 160, canvas.height);
+        else if (turn === 2) ctx.fillRect(0, 0, canvas.width, 140);
+        else if (turn === 3) ctx.fillRect(canvas.width - 160, 0, 160, canvas.height);
+    }
+
+    // --- Draw Player Layouts ---
+    for (let p = 0; p < 4; p++) {
+        const hand = players[p];
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px Arial';
+        
+        if (p === 0) { 
+            ctx.textAlign = 'center';
+            ctx.fillText(PLAYER_NAMES[p], canvas.width / 2, canvas.height - 140);
+            const startX = canvas.width / 2 - (hand.length * (CARD_WIDTH + 10)) / 2;
+            hand.forEach((card, idx) => {
+                let isCardTargeted = (isSelectingMatch && idx === selectedHandCardIdx);
+                let currentY = canvas.height - CARD_HEIGHT - (isCardTargeted ? 45 : 30);
+                drawCard(startX + idx * (CARD_WIDTH + 10), currentY, card, false, isCardTargeted);
+            });
+        } 
+        else if (p === 1) { 
+            ctx.textAlign = 'left';
+            ctx.fillText(PLAYER_NAMES[p], 20, canvas.height / 2 - (hand.length * 35)/2 - 15);
+            hand.forEach((card, idx) => {
+                drawCard(20, canvas.height / 2 - (hand.length * 35)/2 + idx * 35, card);
+            });
+        } 
+        else if (p === 2) { 
+            ctx.textAlign = 'center';
+            ctx.fillText(PLAYER_NAMES[p], canvas.width / 2, 30);
+            const startX = canvas.width / 2 - (hand.length * (CARD_WIDTH + 10)) / 2;
+            hand.forEach((card, idx) => {
+                drawCard(startX + idx * (CARD_WIDTH + 10), 45, card);
+            });
+        } 
+        else if (p === 3) { 
+            ctx.textAlign = 'right';
+            ctx.fillText(PLAYER_NAMES[p], canvas.width - 20, canvas.height / 2 - (hand.length * 35)/2 - 15);
+            hand.forEach((card, idx) => {
+                drawCard(canvas.width - CARD_WIDTH - 20, canvas.height / 2 - (hand.length * 35)/2 + idx * 35, card);
+            });
+        }
+    }
+    
+    // --- Draw Center Table ---
+    const deckX = canvas.width / 2 - CARD_WIDTH - 30;
+    const deckY = canvas.height / 2 - CARD_HEIGHT / 2;
+    if (deck.length > 0) {
+        drawCard(deckX, deckY, null, true);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Deck: ${deck.length}`, deckX + CARD_WIDTH / 2, deckY + CARD_HEIGHT + 18);
+    } else {
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(deckX, deckY, CARD_WIDTH, CARD_HEIGHT);
+    }
+    
+    const centerStartX = canvas.width / 2 + 10;
+    const centerStartY = canvas.height / 2 - CARD_HEIGHT / 2;
+    
+    centerCards.forEach((cCard, idx) => {
+        let offsetX = (idx % 2) * (CARD_WIDTH + 15);
+        let offsetY = Math.floor(idx / 2) * (CARD_HEIGHT / 2 + 15) - 30; 
+        
+        let cx = centerStartX + offsetX;
+        let cy = centerStartY + offsetY;
+        
+        if (cCard.isFaceDown) {
+            drawCard(cx, cy, null, true);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.font = 'bold 11px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText("OPEN PILE", cx + CARD_WIDTH / 2, cy + CARD_HEIGHT / 2);
+        } else {
+            let highlightOption = (isSelectingMatch && !cCard.isFaceDown);
+            drawCard(cx, cy, cCard, false, highlightOption);
+        }
+    });
+}
+
+initGame();
+</script>
+
+</body>
+</html>
