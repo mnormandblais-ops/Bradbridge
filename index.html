@@ -24,39 +24,69 @@
             border-radius: 10px;
         }
         #ui-overlay {
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             color: white;
-            font-size: 20px;
+            font-size: 18px;
             text-shadow: 1px 1px 3px black;
             text-align: center;
             display: flex;
             flex-direction: column;
             align-items: center;
+            gap: 8px;
+        }
+        #scoreboard {
+            display: flex;
+            gap: 20px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 6px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .btn-container {
+            display: flex;
             gap: 10px;
         }
-        #restart-btn {
-            padding: 10px 20px;
-            font-size: 16px;
+        .action-btn {
+            padding: 8px 16px;
+            font-size: 14px;
             font-weight: bold;
-            background-color: #ff9800;
             color: white;
             border: none;
             border-radius: 5px;
             cursor: pointer;
             box-shadow: 0px 4px 6px rgba(0,0,0,0.3);
-            display: none;
             transition: background-color 0.2s;
+        }
+        #restart-btn {
+            background-color: #ff9800;
+            display: none;
         }
         #restart-btn:hover {
             background-color: #e65100;
+        }
+        #clear-scores-btn {
+            background-color: #d32f2f;
+        }
+        #clear-scores-btn:hover {
+            background-color: #9a0007;
         }
     </style>
 </head>
 <body>
 
 <div id="ui-overlay">
+    <div id="scoreboard">
+        <span>Team A (You & Partner): <span id="team-a-score">0</span></span>
+        <span>|</span>
+        <span>Team B (AIs): <span id="team-b-score">0</span></span>
+    </div>
     <div id="status-msg">Initializing Bradbridge...</div>
-    <button id="restart-btn" onclick="handleRestartClick()">Start New Game</button>
+    <div class="btn-container">
+        <button id="restart-btn" class="action-btn" onclick="handleRestartClick()">Start New Game</button>
+        <button id="clear-scores-btn" class="action-btn" onclick="handleClearScoresClick()">Reset Scoreboard</button>
+    </div>
 </div>
 <canvas id="gameCanvas" width="900" height="700"></canvas>
 
@@ -65,6 +95,8 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const statusMsg = document.getElementById('status-msg');
 const restartBtn = document.getElementById('restart-btn');
+const teamAScoreEl = document.getElementById('team-a-score');
+const teamBScoreEl = document.getElementById('team-b-score');
 
 // --- Game Configurations ---
 const CARD_WIDTH = 70;
@@ -80,19 +112,22 @@ let dealer = 0;
 let gameOver = false;
 let gameStatusText = "";
 
+// Scoreboard Tracking
+let teamAScore = 0;
+let teamBScore = 0;
+
 // Selection state for manual wild card matching
 let isSelectingMatch = false;
 let selectedHandCardIdx = -1;
 
 function createDeck() {
     const newDeck = [];
-    // Included 'J' as a normal card; full 52-card deck
     const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
     for (let i = 0; i < 4; i++) {
         for (let val of values) {
             newDeck.push({
                 value: val,
-                isWild: ['Q', 'K'].includes(val), // Only Queen & King remain Wilds
+                isWild: ['Q', 'K'].includes(val),
                 id: Math.random()
             });
         }
@@ -105,6 +140,17 @@ function shuffle(array) {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
     }
+}
+
+function updateScoreboardUI() {
+    teamAScoreEl.textContent = teamAScore;
+    teamBScoreEl.textContent = teamBScore;
+}
+
+function handleClearScoresClick() {
+    teamAScore = 0;
+    teamBScore = 0;
+    updateScoreboardUI();
 }
 
 function initGame() {
@@ -156,16 +202,39 @@ function getOpenPileIndex() {
 }
 
 function checkWinCondition(playerIndex) {
+    // Standard Win: A player runs out of cards
     if (players[playerIndex].length === 0) {
         gameOver = true;
-        const team = (playerIndex % 2 === 0) ? "Team A (You & Partner)" : "Team B (E & W AIs)";
-        gameStatusText = `🎉 ${PLAYER_NAMES[playerIndex]} has no more cards! ${team} Wins the Game!`;
+        const isTeamA = (playerIndex % 2 === 0);
+        if (isTeamA) {
+            teamAScore++;
+            gameStatusText = `🎉 ${PLAYER_NAMES[playerIndex]} has no more cards! Team A (You & Partner) Wins!`;
+        } else {
+            teamBScore++;
+            gameStatusText = `🎉 ${PLAYER_NAMES[playerIndex]} has no more cards! Team B (E & W AIs) Wins!`;
+        }
+        updateScoreboardUI();
         restartBtn.style.display = 'block';
         return true;
     }
+    
+    // Empty Deck Win Condition
     if (deck.length === 0) {
         gameOver = true;
-        gameStatusText = "👔 Out of cards! The game ends in a Draw.";
+        const teamACards = players[0].length + players[2].length;
+        const teamBCards = players[1].length + players[3].length;
+
+        if (teamACards < teamBCards) {
+            teamAScore++;
+            gameStatusText = `📦 Deck empty! Team A Wins (${teamACards} cards vs Team B's ${teamBCards} cards)!`;
+        } else if (teamBCards < teamACards) {
+            teamBScore++;
+            gameStatusText = `📦 Deck empty! Team B Wins (${teamBCards} cards vs Team A's ${teamACards} cards)!`;
+        } else {
+            gameStatusText = `👔 Deck empty! It's a Draw! Both teams have ${teamACards} cards.`;
+        }
+        
+        updateScoreboardUI();
         restartBtn.style.display = 'block';
         return true;
     }
@@ -206,11 +275,9 @@ function executeMove(playerIdx, playerCardIdx, centerIdx, moveType) {
         const pCard = hand[playerCardIdx];
         const wasLastCardWild = (hand.length === 1 && pCard.isWild);
 
-        // Standard Match Play
         centerCards[centerIdx] = { value: pCard.value, isWild: pCard.isWild, isFaceDown: true };
         hand.splice(playerCardIdx, 1);
 
-        // If played as a final Wild Card, automatically draw a replacement card
         if (wasLastCardWild) {
             if (deck.length > 0) {
                 hand.push(deck.pop());
@@ -245,8 +312,8 @@ function aiTurn() {
 
     const hand = players[turn];
     const partnerIdx = (turn + 2) % 4;
-    const nextOpponentIdx = (turn + 1) % 4; // Left opponent
-    const prevOpponentIdx = (turn + 3) % 4; // Right opponent
+    const nextOpponentIdx = (turn + 1) % 4;
+    const prevOpponentIdx = (turn + 3) % 4;
 
     const partnerHand = players[partnerIdx];
     const nextOppHand = players[nextOpponentIdx];
@@ -255,7 +322,6 @@ function aiTurn() {
     const partnerNeedsWin = partnerHand.length <= 2;
     const opponentThreat = nextOppHand.length <= 2 || prevOppHand.length <= 2;
 
-    // --- Step 1: Collect and Score All Valid Match Moves ---
     let possibleMatches = [];
 
     for (let i = 0; i < hand.length; i++) {
@@ -285,18 +351,17 @@ function aiTurn() {
                 }
             }
 
-            // --- RULE 2: Avoid playing a card if an opponent (Left or Right) shares the same card ---
             const leftOpponentHasCard = nextOppHand.some(c => !c.isWild && c.value === handCard.value);
             const rightOpponentHasCard = prevOppHand.some(c => !c.isWild && c.value === handCard.value);
 
             if (leftOpponentHasCard) {
-                score -= 45; // Strongly avoid playing if left opponent has it
+                score -= 45;
             } else if (rightOpponentHasCard) {
-                score -= 30; // Avoid playing if right opponent has it
+                score -= 30;
             }
 
             if (opponentThreat && (leftOpponentHasCard || rightOpponentHasCard)) {
-                score -= 30; // Additional penalty if opponents are close to winning
+                score -= 30;
             }
 
             possibleMatches.push({
@@ -307,25 +372,21 @@ function aiTurn() {
         }
     }
 
-    // --- Step 2: Execute Best Option If Favorable ---
     if (possibleMatches.length > 0) {
         possibleMatches.sort((a, b) => b.score - a.score);
         const bestMove = possibleMatches[0];
         
-        // AI will match if non-wild or score is good enough
         if (!hand[bestMove.handIdx].isWild || bestMove.score > 60 || hand.length === 1) {
             executeMove(turn, bestMove.handIdx, bestMove.centerIdx, 'MATCH');
             return;
         }
     }
 
-    // --- Step 3: Open Pile Strategy ---
     if (hasOpenPile()) {
         const pileIdx = getOpenPileIndex();
         
         let chosenCardIdx = -1;
 
-        // --- RULE 1: If you share a non-wild card with partner, play it to open pile ---
         for (let i = 0; i < hand.length; i++) {
             const hCard = hand[i];
             if (!hCard.isWild) {
@@ -337,7 +398,6 @@ function aiTurn() {
             }
         }
 
-        // Fallback: Pick first non-wild card if no shared partner card was found
         if (chosenCardIdx === -1) {
             for (let i = 0; i < hand.length; i++) {
                 if (!hand[i].isWild) {
@@ -347,105 +407,14 @@ function aiTurn() {
             }
         }
 
-        // Final fallback: Use index 0
         if (chosenCardIdx === -1) chosenCardIdx = 0;
 
         executeMove(turn, chosenCardIdx, pileIdx, 'OPEN_PILE');
         return;
     }
 
-    // --- Step 4: Draw a Card ---
     executeMove(turn, -1, -1, 'NO_MATCH');
 }
-
-//function aiTurn() {
-//    if (gameOver) return;
-//
-//    const hand = players[turn];
-//    const partnerIdx = (turn + 2) % 4;
-//    const nextOpponentIdx = (turn + 1) % 4;
-//    const otherOpponentIdx = (turn + 3) % 4;
-//
-//    const partnerHand = players[partnerIdx];
-//    const nextOppHand = players[nextOpponentIdx];
-//    const otherOppHand = players[otherOpponentIdx];
-//
-//    const partnerNeedsWin = partnerHand.length <= 2;
-//    const opponentThreat = nextOppHand.length <= 2 || otherOppHand.length <= 2;
-//
-//    // --- Step 1: Collect and Score All Valid Match Moves ---
-//    let possibleMatches = [];
-//
-//    for (let i = 0; i < hand.length; i++) {
-//        const handCard = hand[i];
-//
-//        for (let j = 0; j < centerCards.length; j++) {
-//            const centerCard = centerCards[j];
-//            if (centerCard.isFaceDown || !isMatch(handCard, centerCard)) continue;
-//
-//            let score = 100;
-//
-//            if (handCard.isWild) {
-//                score -= 40; 
-//                if (hand.length <= 2 || partnerNeedsWin) {
-//                    score += 50;
-//                }
-//            }
-//
-//            const partnerHasMatch = partnerHand.some(c => isMatch(c, centerCard));
-//            if (partnerHasMatch) {
-//                if (partnerNeedsWin) {
-//                    if (hand.length > partnerHand.length) {
-//                        score -= 25; 
-//                    }
-//                } else {
-//                    score += 15;
-//                }
-//            }
-//
-//            const nextOpponentCanMatch = nextOppHand.some(c => isMatch(c, handCard));
-//            if (nextOpponentCanMatch && opponentThreat) {
-//                score -= 30;
-//            }
-//
-//            possibleMatches.push({
-//                handIdx: i,
-//                centerIdx: j,
-//                score: score
-//            });
-//        }
-//    }
-//
-//    // --- Step 2: Execute Best Option If Favorable ---
-//    if (possibleMatches.length > 0) {
-//        possibleMatches.sort((a, b) => b.score - a.score);
-//        const bestMove = possibleMatches[0];
-//        
-//        // AI will match if non-wild or score is good enough
-//        if (!hand[bestMove.handIdx].isWild || bestMove.score > 60 || hand.length === 1) {
-//            executeMove(turn, bestMove.handIdx, bestMove.centerIdx, 'MATCH');
-//            return;
-//        }
-//    }
-//
-//    // --- Step 3: Fallback Options (Open Pile or Draw) ---
-//    if (hasOpenPile()) {
-//        const pileIdx = getOpenPileIndex();
-//        
-//        let chosenCardIdx = 0;
-//        for (let i = 0; i < hand.length; i++) {
-//            if (!hand[i].isWild) {
-//                chosenCardIdx = i;
-//                break;
-//            }
-//        }
-//        executeMove(turn, chosenCardIdx, pileIdx, 'OPEN_PILE');
-//        return;
-//    }
-//
-//    // Step 4: Choose to Draw a card instead of making an unfavorable match
-//    executeMove(turn, -1, -1, 'NO_MATCH');
-//}
 
 canvas.addEventListener('click', function(e) {
     if (gameOver || turn !== 0) return; 
@@ -457,7 +426,6 @@ canvas.addEventListener('click', function(e) {
     const centerStartX = canvas.width / 2 + 10;
     const centerStartY = canvas.height / 2 - CARD_HEIGHT / 2;
 
-    // --- Scenario A: Selecting center card to match via Wild Card ---
     if (isSelectingMatch) {
         let clickedCenterIdx = -1;
         
@@ -485,7 +453,6 @@ canvas.addEventListener('click', function(e) {
         return;
     }
 
-    // --- Scenario B: Standard Hand Card Selection Turn ---
     const p0Cards = players[0];
     const startX = canvas.width / 2 - (p0Cards.length * (CARD_WIDTH + 10)) / 2;
     const yPos = canvas.height - CARD_HEIGHT - 30;
@@ -509,7 +476,6 @@ canvas.addEventListener('click', function(e) {
             }
         }
         
-        // If card matches, make the match (or prompt wild choice)
         if (matchIndices.length > 0) {
             if (selectedHandCard.isWild && matchIndices.length > 1) {
                 isSelectingMatch = true;
@@ -520,15 +486,12 @@ canvas.addEventListener('click', function(e) {
                 executeMove(0, clickedCardIdx, matchIndices[0], 'MATCH');
             }
         } else if (hasOpenPile()) {
-            // Otherwise, cover an open pile if one exists
             const pileIdx = getOpenPileIndex();
             executeMove(0, clickedCardIdx, pileIdx, 'OPEN_PILE');
         } else {
-            // Otherwise, draw a card
             executeMove(0, -1, -1, 'NO_MATCH');
         }
     } else {
-        // Deck Click or background click check - players can freely choose to draw at any time
         const deckX = canvas.width / 2 - CARD_WIDTH - 20;
         const deckY = canvas.height / 2 - CARD_HEIGHT / 2;
         if (mx >= deckX && mx <= deckX + CARD_WIDTH && my >= deckY && my <= deckY + CARD_HEIGHT) {
@@ -598,7 +561,6 @@ function render() {
         else if (turn === 3) ctx.fillRect(canvas.width - 160, 0, 160, canvas.height);
     }
 
-    // --- Draw Player Layouts ---
     for (let p = 0; p < 4; p++) {
         const hand = players[p];
         ctx.fillStyle = '#ffffff';
@@ -638,7 +600,6 @@ function render() {
         }
     }
     
-    // --- Draw Center Table ---
     const deckX = canvas.width / 2 - CARD_WIDTH - 30;
     const deckY = canvas.height / 2 - CARD_HEIGHT / 2;
     if (deck.length > 0) {
@@ -651,6 +612,10 @@ function render() {
         ctx.strokeStyle = 'rgba(255,255,255,0.4)';
         ctx.lineWidth = 2;
         ctx.strokeRect(deckX, deckY, CARD_WIDTH, CARD_HEIGHT);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Deck: 0`, deckX + CARD_WIDTH / 2, deckY + CARD_HEIGHT + 18);
     }
     
     const centerStartX = canvas.width / 2 + 10;
