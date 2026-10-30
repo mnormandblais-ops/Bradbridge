@@ -18,6 +18,86 @@
             overflow: hidden;
             user-select: none;
         }
+
+        /* Welcome Page Overlay Styles */
+        #welcome-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(26, 71, 42, 0.96);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            cursor: pointer;
+            text-align: center;
+            padding: 20px;
+            transition: opacity 0.4s ease;
+        }
+
+        #welcome-content {
+            background-color: #2e7d32;
+            padding: 40px 60px;
+            border-radius: 12px;
+            border: 2px solid #ff9800;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            max-width: 500px;
+            width: 100%;
+        }
+
+        #welcome-content h1 {
+            font-size: 2.5rem;
+            margin-bottom: 5px;
+            color: #ffffff;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 3px black;
+        }
+
+        .welcome-creator {
+            font-size: 1rem;
+            color: #dcedc8;
+            margin-bottom: 15px;
+            font-style: italic;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .welcome-subtitle {
+            font-size: 1.1rem;
+            color: #ff9800;
+            margin-bottom: 15px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .welcome-desc {
+            font-size: 0.95rem;
+            color: #e8f5e9;
+            margin-bottom: 30px;
+            line-height: 1.4;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .start-btn {
+            background-color: #ff9800;
+            color: #1a472a;
+            border: none;
+            padding: 12px 28px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .start-btn:hover {
+            background-color: #ffa726;
+            transform: scale(1.03);
+        }
+
         canvas {
             background-color: #2e7d32;
             box-shadow: 0px 0px 20px rgba(0,0,0,0.5);
@@ -76,6 +156,17 @@
 </head>
 <body>
 
+    <!-- Welcome Page Overlay -->
+    <div id="welcome-overlay">
+        <div id="welcome-content" onclick="event.stopPropagation()">
+            <h1>BRADBRIDGE</h1>
+            <div class="welcome-creator">Created by Normand M. Blais</div>
+            <div class="welcome-subtitle">Game For Four Players (Partnerships)</div>
+            <div class="welcome-desc">Jacks, Queens, and Kings are wild cards! Match or cover center cards strategically and work with your partner to outsmart the AI opponents!</div>
+            <button class="start-btn" id="startWelcomeBtn">Click here to start the Game</button>
+        </div>
+    </div>
+
 <div id="ui-overlay">
     <div id="scoreboard">
         <span>Team A (You & Partner): <span id="team-a-score">0</span></span>
@@ -111,6 +202,7 @@ let turn = 0;
 let dealer = 0;
 let gameOver = false;
 let gameStatusText = "";
+let gameStarted = false;
 
 // Scoreboard Tracking
 let teamAScore = 0;
@@ -120,6 +212,12 @@ let teamBScore = 0;
 let isSelectingMatch = false;
 let selectedHandCardIdx = -1;
 
+// --- AI Memory Tracking ---
+let seenCardMemory = {};
+
+const welcomeOverlay = document.getElementById('welcome-overlay');
+const startWelcomeBtn = document.getElementById('startWelcomeBtn');
+
 function createDeck() {
     const newDeck = [];
     const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -127,7 +225,7 @@ function createDeck() {
         for (let val of values) {
             newDeck.push({
                 value: val,
-                isWild: ['Q', 'K'].includes(val),
+                isWild: ['J', 'Q', 'K'].includes(val), // Jacks, Queens, and Kings are now wild
                 id: Math.random()
             });
         }
@@ -162,11 +260,14 @@ function initGame() {
     gameOver = false;
     isSelectingMatch = false;
     selectedHandCardIdx = -1;
+    seenCardMemory = {};
     restartBtn.style.display = 'none';
     
     for (let i = 0; i < 5; i++) {
         for (let p = 0; p < 4; p++) {
-            players[p].push(deck.pop());
+            let drawn = deck.pop();
+            players[p].push(drawn);
+            trackCardMemory(drawn);
         }
     }
     
@@ -177,15 +278,21 @@ function initGame() {
             isWild: card.isWild,
             isFaceDown: false
         });
+        trackCardMemory(card);
     }
     
     turn = (dealer + 1) % 4;
     updateStatus();
     render();
     
-    if (turn !== 0) {
+    if (gameStarted && turn !== 0) {
         setTimeout(aiTurn, 1200);
     }
+}
+
+function trackCardMemory(card) {
+    if (!card || card.isWild) return;
+    seenCardMemory[card.value] = (seenCardMemory[card.value] || 0) + 1;
 }
 
 function isMatch(cardA, cardB) {
@@ -202,7 +309,6 @@ function getOpenPileIndex() {
 }
 
 function checkWinCondition(playerIndex) {
-    // Standard Win: A player runs out of cards
     if (players[playerIndex].length === 0) {
         gameOver = true;
         const isTeamA = (playerIndex % 2 === 0);
@@ -217,28 +323,28 @@ function checkWinCondition(playerIndex) {
         restartBtn.style.display = 'block';
         return true;
     }
-    
-    // Empty Deck Win Condition
-    if (deck.length === 0) {
-        gameOver = true;
-        const teamACards = players[0].length + players[2].length;
-        const teamBCards = players[1].length + players[3].length;
-
-        if (teamACards < teamBCards) {
-            teamAScore++;
-            gameStatusText = `📦 Deck empty! Team A Wins (${teamACards} cards vs Team B's ${teamBCards} cards)!`;
-        } else if (teamBCards < teamACards) {
-            teamBScore++;
-            gameStatusText = `📦 Deck empty! Team B Wins (${teamBCards} cards vs Team A's ${teamACards} cards)!`;
-        } else {
-            gameStatusText = `👔 Deck empty! It's a Draw! Both teams have ${teamACards} cards.`;
-        }
-        
-        updateScoreboardUI();
-        restartBtn.style.display = 'block';
-        return true;
-    }
     return false;
+}
+
+function triggerDeckOutEnd(playerIdx) {
+    gameOver = true;
+    const teamACards = players[0].length + players[2].length;
+    const teamBCards = players[1].length + players[3].length;
+
+    if (teamACards < teamBCards) {
+        teamAScore++;
+        gameStatusText = `📦 Empty deck draw forced by ${PLAYER_NAMES[playerIdx]}! Team A Wins (${teamACards} vs ${teamBCards} cards)!`;
+    } else if (teamBCards < teamACards) {
+        teamBScore++;
+        gameStatusText = `📦 Empty deck draw forced by ${PLAYER_NAMES[playerIdx]}! Team B Wins (${teamBCards} vs ${teamACards} cards)!`;
+    } else {
+        gameStatusText = `👔 Empty deck draw forced! It's a Draw! Both teams have ${teamACards} cards.`;
+    }
+    
+    updateScoreboardUI();
+    restartBtn.style.display = 'block';
+    updateStatus();
+    render();
 }
 
 function nextTurn() {
@@ -248,7 +354,7 @@ function nextTurn() {
     updateStatus();
     render();
     
-    if (!gameOver && turn !== 0) {
+    if (gameStarted && !gameOver && turn !== 0) {
         setTimeout(aiTurn, 1400);
     }
 }
@@ -259,7 +365,7 @@ function updateStatus() {
     } else if (isSelectingMatch) {
         statusMsg.innerHTML = "<b>Wild Card Active:</b> Click one of the highlighted face-up center cards to match it.";
     } else {
-        statusMsg.innerHTML = turn === 0 ? "<b>Your Turn:</b> Click a card to match/cover open pile, or click the Deck to draw." : `<b>${PLAYER_NAMES[turn]}'s Turn...</b> Thinking.`;
+        statusMsg.innerHTML = turn === 0 ? "<b>Your Turn:</b> Click a card to match/cover open pile, or click the Deck to draw." : `<b>${PLAYER_NAMES[turn]}'s Turn...</b> Thinking strategically.`;
     }
 }
 
@@ -277,24 +383,43 @@ function executeMove(playerIdx, playerCardIdx, centerIdx, moveType) {
 
         centerCards[centerIdx] = { value: pCard.value, isWild: pCard.isWild, isFaceDown: true };
         hand.splice(playerCardIdx, 1);
+        trackCardMemory(pCard);
 
         if (wasLastCardWild) {
             if (deck.length > 0) {
-                hand.push(deck.pop());
+                let drawn = deck.pop();
+                hand.push(drawn);
+                trackCardMemory(drawn);
+            } else {
+                triggerDeckOutEnd(playerIdx);
+                return;
             }
         }
     } 
     else if (moveType === 'NO_MATCH') {
         if (deck.length > 0) {
-            hand.push(deck.pop());
+            let drawn = deck.pop();
+            hand.push(drawn);
+            trackCardMemory(drawn);
+        } else {
+            triggerDeckOutEnd(playerIdx);
+            return;
         }
     } 
     else if (moveType === 'OPEN_PILE') {
         const pCard = hand[playerCardIdx];
         centerCards[centerIdx] = { value: pCard.value, isWild: pCard.isWild, isFaceDown: false };
         hand.splice(playerCardIdx, 1);
+        trackCardMemory(pCard);
+        
         if (deck.length > 0) {
-            hand.push(deck.pop());
+            let drawn = deck.pop();
+            hand.push(drawn);
+            trackCardMemory(drawn);
+        } else {
+            hand.push(pCard);
+            triggerDeckOutEnd(playerIdx);
+            return;
         }
     }
     
@@ -308,7 +433,7 @@ function executeMove(playerIdx, playerCardIdx, centerIdx, moveType) {
 }
 
 function aiTurn() {
-    if (gameOver) return;
+    if (!gameStarted || gameOver) return;
 
     const hand = players[turn];
     const partnerIdx = (turn + 2) % 4;
@@ -321,6 +446,7 @@ function aiTurn() {
 
     const partnerNeedsWin = partnerHand.length <= 2;
     const opponentThreat = nextOppHand.length <= 2 || prevOppHand.length <= 2;
+    const isEndgame = deck.length <= 5;
 
     let possibleMatches = [];
 
@@ -334,34 +460,40 @@ function aiTurn() {
             let score = 100;
 
             if (handCard.isWild) {
-                score -= 40; 
-                if (hand.length <= 2 || partnerNeedsWin) {
-                    score += 50;
+                score -= 30; 
+                if (hand.length === 1 || partnerNeedsWin) {
+                    score += 60; 
+                } else if (opponentThreat) {
+                    score -= 20; 
+                }
+            } else {
+                const frequency = seenCardMemory[handCard.value] || 0;
+                if (frequency <= 1) {
+                    score += 15; 
                 }
             }
 
             const partnerHasMatch = partnerHand.some(c => isMatch(c, centerCard));
             if (partnerHasMatch) {
                 if (partnerNeedsWin) {
-                    if (hand.length > partnerHand.length) {
-                        score -= 25; 
-                    }
+                    score += 40; 
                 } else {
-                    score += 15;
+                    score += 10;
                 }
             }
 
-            const leftOpponentHasCard = nextOppHand.some(c => !c.isWild && c.value === handCard.value);
-            const rightOpponentHasCard = prevOppHand.some(c => !c.isWild && c.value === handCard.value);
+            const leftOppHasCard = nextOppHand.some(c => !c.isWild && c.value === handCard.value);
+            const rightOppHasCard = prevOppHand.some(c => !c.isWild && c.value === handCard.value);
 
-            if (leftOpponentHasCard) {
-                score -= 45;
-            } else if (rightOpponentHasCard) {
-                score -= 30;
+            if (leftOppHasCard) score -= 35;
+            if (rightOppHasCard) score -= 25;
+
+            if (opponentThreat && (leftOppHasCard || rightOppHasCard)) {
+                score -= 40; 
             }
 
-            if (opponentThreat && (leftOpponentHasCard || rightOpponentHasCard)) {
-                score -= 30;
+            if (isEndgame) {
+                score += (6 - hand.length) * 5;
             }
 
             possibleMatches.push({
@@ -376,7 +508,7 @@ function aiTurn() {
         possibleMatches.sort((a, b) => b.score - a.score);
         const bestMove = possibleMatches[0];
         
-        if (!hand[bestMove.handIdx].isWild || bestMove.score > 60 || hand.length === 1) {
+        if (!hand[bestMove.handIdx].isWild || bestMove.score > 50 || hand.length === 1) {
             executeMove(turn, bestMove.handIdx, bestMove.centerIdx, 'MATCH');
             return;
         }
@@ -384,7 +516,6 @@ function aiTurn() {
 
     if (hasOpenPile()) {
         const pileIdx = getOpenPileIndex();
-        
         let chosenCardIdx = -1;
 
         for (let i = 0; i < hand.length; i++) {
@@ -417,7 +548,7 @@ function aiTurn() {
 }
 
 canvas.addEventListener('click', function(e) {
-    if (gameOver || turn !== 0) return; 
+    if (!gameStarted || gameOver || turn !== 0) return; 
     
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -554,7 +685,7 @@ function render() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-    if (!gameOver) {
+    if (!gameOver && gameStarted) {
         if (turn === 0) ctx.fillRect(0, canvas.height - 150, canvas.width, 150);
         else if (turn === 1) ctx.fillRect(0, 0, 160, canvas.height);
         else if (turn === 2) ctx.fillRect(0, 0, canvas.width, 140);
@@ -641,6 +772,19 @@ function render() {
     });
 }
 
+function startGame() {
+    gameStarted = true;
+    welcomeOverlay.style.opacity = '0';
+    setTimeout(() => {
+        welcomeOverlay.style.display = 'none';
+    }, 400);
+    initGame();
+}
+
+welcomeOverlay.addEventListener('click', startGame);
+startWelcomeBtn.addEventListener('click', startGame);
+
+// Preload board state behind welcome screen
 initGame();
 </script>
 
